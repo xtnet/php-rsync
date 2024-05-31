@@ -1,26 +1,21 @@
 <?php
 /**
  * 递归扫描目录并获取文件信息
- *
  * @param string $dir 要扫描的目录路径
  * @return array 文件信息数组
  */
 function scanDirectory($dir) {
     $result = [];
-
     $items = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir), RecursiveIteratorIterator::SELF_FIRST);
 
     foreach ($items as $item) {
         if ($item->isFile()) {
-            $filePath = $item->getPathname();
-            $fileInfo = [
-                'path' => $filePath,
+            $result[] = [
+                'path' => $item->getPathname(),
                 'modified_time' => $item->getMTime()
             ];
-            $result[] = $fileInfo;
         }
     }
-
     return $result;
 }
 
