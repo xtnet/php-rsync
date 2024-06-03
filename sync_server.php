@@ -6,12 +6,20 @@
  */
 function scanDirectory($dir) {
     $result = [];
-    $items = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir), RecursiveIteratorIterator::SELF_FIRST);
+    $baseDir = realpath($dir);
+
+    // 确保基目录是有效路径并且在允许的范围内
+    if ($baseDir === false || strpos($baseDir, __DIR__) !== 0) {
+        throw new RuntimeException('Invalid directory path');
+    }
+
+    $items = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($baseDir), RecursiveIteratorIterator::SELF_FIRST);
 
     foreach ($items as $item) {
-        if ($item->isFile()) {
+        $itemPath = $item->getRealPath();
+        if ($itemPath !== false && strpos($itemPath, $baseDir) === 0 && $item->isFile()) {
             $result[] = [
-                'path' => $item->getPathname(),
+                'path' => '.' . DIRECTORY_SEPARATOR . str_replace($baseDir . DIRECTORY_SEPARATOR, '', $itemPath), // 相对路径
                 'modified_time' => $item->getMTime()
             ];
         }
@@ -19,17 +27,18 @@ function scanDirectory($dir) {
     return $result;
 }
 
-// 生成 JSON 内容
-$directoryToScan = '.';
+// 设置当前目录作为扫描目录
+$directoryToScan = __DIR__;
 $fileInfo = scanDirectory($directoryToScan);
 $jsonData = json_encode($fileInfo, JSON_PRETTY_PRINT);
 
 // 如果有请求参数，则下载对应文件
 if (isset($_GET['f'])) {
-    $filename = $_GET['f'];
-    $filePath = __DIR__ . DIRECTORY_SEPARATOR . $filename;
+    $filename = basename($_GET['f']); // 使用 basename 确保文件名安全
+    $filePath = realpath($directoryToScan . DIRECTORY_SEPARATOR . $filename);
 
-    if (file_exists($filePath) && is_file($filePath)) {
+    // 确保文件路径在当前目录范围内
+    if ($filePath !== false && strpos($filePath, $directoryToScan) === 0 && is_file($filePath)) {
         header('Content-Description: File Transfer');
         header('Content-Type: application/octet-stream');
         header('Content-Disposition: attachment; filename="' . basename($filePath) . '"');
