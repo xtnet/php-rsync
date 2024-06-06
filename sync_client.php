@@ -1,134 +1,101 @@
 <?php
-// 设置远程 JSON 数据 URL 和日志文件路径
-$remoteJsonUrl = 'https://你的域名/sync_server.php';
-$logFile = 'sync_log.txt';
-$remoteFiles = getRemoteJson($remoteJsonUrl); // 获取远程 JSON 数据
-if ($remoteFiles === null) {
-    die('无法获取远程 JSON 数据');
-}
-$localFiles = scanDirectory(__DIR__); // 扫描本地目录并获取文件信息
-syncFiles($remoteFiles, $localFiles, $logFile); // 同步文件并记录日志
-echo "同步完成";
 
-/**
- * 递归扫描目录并获取文件信息
- * @param string $dir 要扫描的目录路径
- * @return array 文件信息数组
- */
-function scanDirectory($dir) {
-    global $logFile; // 获取全局变量
-    $result = [];
-    $items = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir), RecursiveIteratorIterator::SELF_FIRST);
+$directoryStructureURL = 'https://你的域名/sync_server.php';
+
+$remoteDirectoryStructureJSON = file_get_contents($directoryStructureURL);
+
+$remoteDirectoryStructure = json_decode($remoteDirectoryStructureJSON, true);
+
+$syncDirectory = 'sync';
+
+$log = '';
+
+function syncDirectory($items, $syncDirectory, &$remoteFiles) {
+    global $log;
 
     foreach ($items as $item) {
-        if ($item->isFile()) {
-            $filePath = $item->getPathname();
-            $fileName = basename($filePath);
+        $path = $item['path'];
+        $type = $item['type'];
+        $size = $item['size'] ?? null; 
+        $mtime = $item['mtime'] ?? null; 
 
-            if (in_array($fileName, [basename(__FILE__), $logFile])) {
-                continue; // 跳过要排除的本地文件
+        $fullPath = $syncDirectory . $path;
+        $remoteFiles[] = $fullPath;
+
+        if ($type === 'directory') {
+            if (!is_dir($fullPath)) {
+                mkdir($fullPath, 0777, true);
+                $log .= "Created directory: $fullPath\n";
             }
 
-            $result[] = [
-                'path' => '.' . DIRECTORY_SEPARATOR . str_replace($dir . DIRECTORY_SEPARATOR, '', $filePath),
-                'modified_time' => $item->getMTime()
-            ];
+            syncDirectory($item['contents'], $syncDirectory, $remoteFiles);
+        } elseif ($type === 'file') {
+            if (!file_exists($fullPath) || $size !== filesize($fullPath) || $mtime !== filemtime($fullPath)) {
+                $fileURL = $GLOBALS['directoryStructureURL'] . '?file=' . urlencode($path);
+                $fileContent = file_get_contents($fileURL);
+                file_put_contents($fullPath, $fileContent);
+                touch($fullPath, $mtime);
+                $log .= "Synced file: $fullPath\n";
+            }
         }
     }
-    return $result;
 }
 
-/**
- * 获取远程 JSON 数据
- * @param string $url 远程 JSON 数据 URL
- * @return array|null 解析后的 JSON 数据数组或 null（如果请求失败）
- */
-function getRemoteJson($url) {
-    $response = file_get_contents($url);
-    return $response !== false ? json_decode($response, true) : null;
-}
+function deleteDirectory($dir) {
+    global $log;
 
-/**
- * 同步文件并记录日志
- * @param array $remoteFiles 远程文件信息
- * @param array $localFiles 本地文件信息
- * @param string $logFile 日志文件路径
- */
-function syncFiles($remoteFiles, $localFiles, $logFile) {
-    $remoteFileMap = array_column($remoteFiles, 'modified_time', 'path');
-    $localFileMap = array_column($localFiles, 'modified_time', 'path');
-    $logEntries = [];
-    $hasChanges = false;
-
-    foreach ($remoteFiles as $remoteFile) {
-        $path = $remoteFile['path'];
-        $remoteMTime = $remoteFile['modified_time'];
-
-        if (!isset($localFileMap[$path])) {
-            $logEntries[] = "新增文件: $path";
-            downloadFile($path);
-            $hasChanges = true;
-        } elseif ($remoteMTime > $localFileMap[$path]) {
-            $logEntries[] = "修改文件: $path";
-            downloadFile($path);
-            $hasChanges = true;
-        }
+    if (!file_exists($dir)) {
+        return;
     }
 
-    foreach ($localFileMap as $path => $localMTime) {
-        if (!isset($remoteFileMap[$path])) {
-            $logEntries[] = "删除文件: $path";
+    $items = new DirectoryIterator($dir);
+    foreach ($items as $item) {
+        if ($item->isDot()) {
+            continue;
+        }
+
+        $path = $item->getPathname();
+        if ($item->isDir()) {
+            deleteDirectory($path);
+        } else {
             unlink($path);
-            $hasChanges = true;
+            $log .= "Deleted file: $path\n";
         }
     }
 
-    $localDirectories = array_unique(array_map('dirname', array_keys($localFileMap)));
-    foreach ($localDirectories as $dir) {
-        deleteEmptyDirectories($dir);
-    }
-
-    if ($hasChanges) {
-        $logEntries[] = "同步完成: " . date('Y-m-d H:i:s');
-        file_put_contents($logFile, implode(PHP_EOL, $logEntries) . PHP_EOL, FILE_APPEND);
-    }
+    rmdir($dir);
+    $log .= "Deleted directory: $dir\n";
 }
 
-/**
- * 递归删除空文件夹
- * @param string $dir 文件夹路径
- */
-function deleteEmptyDirectories($dir) {
-    if (!is_dir($dir)) return;
+$remoteFiles = [];
 
-    foreach (scandir($dir) as $file) {
-        if ($file != '.' && $file != '..') {
-            $filePath = $dir . DIRECTORY_SEPARATOR . $file;
-            if (is_dir($filePath)) {
-                deleteEmptyDirectories($filePath);
+syncDirectory($remoteDirectoryStructure, $syncDirectory, $remoteFiles);
+
+function cleanLocalDirectory($syncDirectory, $remoteFiles) {
+    global $log;
+
+    $localItems = new DirectoryIterator($syncDirectory);
+    foreach ($localItems as $localItem) {
+        if ($localItem->isDot()) {
+            continue;
+        }
+
+        $localPath = $localItem->getPathname();
+        if (!in_array($localPath, $remoteFiles)) {
+            if ($localItem->isDir()) {
+                deleteDirectory($localPath);
+            } elseif ($localItem->isFile()) {
+                unlink($localPath);
+                $log .= "Deleted file: $localPath\n";
             }
+        } else if ($localItem->isDir()) {
+            cleanLocalDirectory($localPath, $remoteFiles);
         }
     }
-
-    if (count(scandir($dir)) == 2) {
-        rmdir($dir);
-    }
 }
 
-/**
- * 从远程服务器下载文件
- * @param string $filePath 要下载的文件路径
- */
-function downloadFile($filePath) {
-    global $remoteJsonUrl;
-    $url = $remoteJsonUrl . '?f=' . urlencode($filePath);
-    $localPath = __DIR__ . DIRECTORY_SEPARATOR . str_replace('./', '', $filePath); // 确保路径相对当前目录
-    $localDir = dirname($localPath);
+cleanLocalDirectory($syncDirectory, $remoteFiles);
 
-    if (!is_dir($localDir)) {
-        mkdir($localDir, 0777, true);
-    }
+echo $log;
 
-    file_put_contents($localPath, file_get_contents($url));
-}
 ?>
