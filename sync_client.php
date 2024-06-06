@@ -2,32 +2,13 @@
 // 设置远程 JSON 数据 URL 和日志文件路径
 $remoteJsonUrl = 'https://你的域名/sync_server.php';
 $logFile = 'sync_log.txt';
-$lockFile = '/tmp/my_lock_file.lock';
-
-preventConcurrentExecution($lockFile);
-
-function preventConcurrentExecution($lockFile) {
-    global $remoteJsonUrl, $logFile; // 获取全局变量
-    $fp = fopen($lockFile, 'c'); // 打开或创建锁文件
-
-    if (flock($fp, LOCK_EX | LOCK_NB)) { // 尝试获得独占锁，非阻塞模式
-        try {
-            $remoteFiles = getRemoteJson($remoteJsonUrl); // 获取远程 JSON 数据
-            if ($remoteFiles === null) {
-                die('无法获取远程 JSON 数据');
-            }
-
-            $localFiles = scanDirectory('.'); // 扫描本地目录并获取文件信息
-            syncFiles($remoteFiles, $localFiles, $logFile); // 同步文件并记录日志
-            echo "同步完成";
-        } finally {
-            flock($fp, LOCK_UN); // 释放锁
-        }
-    } else {
-        echo "同步中"; // 未能获得锁，返回提示信息
-    }
-    fclose($fp); // 关闭文件指针
+$remoteFiles = getRemoteJson($remoteJsonUrl); // 获取远程 JSON 数据
+if ($remoteFiles === null) {
+    die('无法获取远程 JSON 数据');
 }
+$localFiles = scanDirectory(__DIR__); // 扫描本地目录并获取文件信息
+syncFiles($remoteFiles, $localFiles, $logFile); // 同步文件并记录日志
+echo "同步完成";
 
 /**
  * 递归扫描目录并获取文件信息
@@ -49,7 +30,7 @@ function scanDirectory($dir) {
             }
 
             $result[] = [
-                'path' => $filePath,
+                'path' => '.' . DIRECTORY_SEPARATOR . str_replace($dir . DIRECTORY_SEPARATOR, '', $filePath),
                 'modified_time' => $item->getMTime()
             ];
         }
@@ -141,7 +122,7 @@ function deleteEmptyDirectories($dir) {
 function downloadFile($filePath) {
     global $remoteJsonUrl;
     $url = $remoteJsonUrl . '?f=' . urlencode($filePath);
-    $localPath = __DIR__ . DIRECTORY_SEPARATOR . $filePath;
+    $localPath = __DIR__ . DIRECTORY_SEPARATOR . str_replace('./', '', $filePath); // 确保路径相对当前目录
     $localDir = dirname($localPath);
 
     if (!is_dir($localDir)) {
