@@ -1,6 +1,6 @@
 <?php
 // 配置服务端脚本URL
-$directoryStructureURL = 'https://你的域名/sync_server.php';
+$directoryStructureURL = 'https://你的网站/sync_server.php';
 
 // 检查服务端状态
 $ch = curl_init($directoryStructureURL);
@@ -144,5 +144,4 @@ function cleanLocalDirectory($syncDirectory, $remoteFiles) {
 cleanLocalDirectory($syncDirectory, $remoteFiles);
 
 echo $log;
-
 ?>

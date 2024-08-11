@@ -1,5 +1,4 @@
 <?php
-
 function getDirectoryStructure($dir) {
     $result = [];
 
@@ -64,5 +63,4 @@ if (isset($_GET['file'])) {
     // 如果想将 JSON 保存到文件中，可以使用下面的代码
     // file_put_contents('directory_structure.json', $jsonResult);
 }
-
 ?>
